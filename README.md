@@ -1,2 +1,2 @@
 # Rustafarian-Drone
-Repository for the drone for the Advanced Programming project (y. 2024/2025)
+Repository containing the drone for the Advanced Programming course (2024/2025) in Universitá di Trento.
