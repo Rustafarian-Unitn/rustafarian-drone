@@ -188,12 +188,8 @@ impl RustafarianDrone {
 
         let mut route: Vec<u8> = packet.clone()
             .routing_header
-            .hops
-            .split_at(self_index)
-            .0
-            .clone()
-            .into_iter()
-            .collect();
+            .hops;
+        route.truncate(self_index);
         route.reverse();
 
         let routing_header = SourceRoutingHeader{
