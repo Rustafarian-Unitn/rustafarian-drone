@@ -3,11 +3,10 @@ use crossbeam_channel::{select_biased, unbounded, Receiver, Sender};
 use std::collections::HashMap;
 use std::{fs, thread};
 use wg_2024::config::Config;
-use wg_2024::controller::{DroneCommand, NodeEvent};
+use wg_2024::controller::{DroneCommand, DroneEvent};
 use wg_2024::drone::Drone;
 use wg_2024::network::NodeId;
 use wg_2024::packet::{Packet, PacketType};
-use wg_2024::drone::DroneOptions;
 use rustafarian_drone::RustafarianDrone;
 
 fn main() {
@@ -42,14 +41,14 @@ fn main() {
             .collect();
 
         handles.push(thread::spawn(move || {
-            let mut drone = RustafarianDrone::new(DroneOptions {
-                id: drone.id,
-                controller_recv: controller_drone_recv,
-                controller_send: node_event_send,
+            let mut drone = RustafarianDrone::new(
+                drone.id,
+                node_event_send,
+                controller_drone_recv,
                 packet_recv,
                 packet_send,
-                pdr: drone.pdr,
-            });
+                drone.pdr,
+            );
 
             drone.run();
         }));
@@ -72,7 +71,7 @@ pub fn parse_config(file: &str) -> Config {
 
 struct SimulationController {
     drones: HashMap<NodeId, Sender<DroneCommand>>,
-    node_event_recv: Receiver<NodeEvent>,
+    node_event_recv: Receiver<DroneEvent>,
 }
 
 impl SimulationController {

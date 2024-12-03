@@ -3,9 +3,8 @@ use crossbeam_channel::{select_biased, unbounded, Receiver, Sender};
 use std::collections::{HashMap, HashSet};
 use std::{fs, thread};
 use wg_2024::config::Config;
-use wg_2024::controller::{DroneCommand, NodeEvent};
+use wg_2024::controller::{DroneCommand, DroneEvent};
 use wg_2024::drone::Drone;
-use wg_2024::drone::DroneOptions;
 use wg_2024::network::{NodeId, SourceRoutingHeader};
 use wg_2024::packet::{FloodRequest, FloodResponse, NodeType};
 use wg_2024::packet::{Packet, PacketType};
@@ -13,24 +12,32 @@ use rand::*;
 
 pub struct RustafarianDrone {
     id: NodeId,
-    controller_send: Sender<NodeEvent>,
+    controller_send: Sender<DroneEvent>,
     controller_recv: Receiver<DroneCommand>,
     packet_recv: Receiver<Packet>,
     pdr: f32,
+    // Packet send in Drone interface
     neighbors: HashMap<NodeId, Sender<Packet>>,
     flood_requests: HashSet<u64>, // Contains: O(1) in average
     crashed: bool,
 }
 
 impl Drone for RustafarianDrone {
-    fn new(options: DroneOptions) -> Self {
+    fn new(
+        id: NodeId,
+        controller_send: Sender<DroneEvent>,
+        controller_recv: Receiver<DroneCommand>,
+        packet_recv: Receiver<Packet>,
+        packet_send: HashMap<NodeId, Sender<Packet>>,
+        pdr: f32,
+    ) -> Self {
         Self {
-            id: options.id,
-            controller_send: options.controller_send,
-            controller_recv: options.controller_recv,
-            packet_recv: options.packet_recv,
-            pdr: options.pdr,
-            neighbors: HashMap::new(),
+            id,
+            controller_send,
+            controller_recv,
+            packet_recv,
+            neighbors: packet_send,
+            pdr,
             flood_requests: HashSet::new(),
             crashed: false
         }
@@ -78,6 +85,7 @@ impl RustafarianDrone {
         match command {
             DroneCommand::AddSender(node_id, sender) => self.add_neighbor(node_id, sender),
             DroneCommand::SetPacketDropRate(pdr) => self.set_packet_drop_rate(pdr),
+            DroneCommand::RemoveSender(node_id) => self.remove_sender(node_id),
             DroneCommand::Crash => self.make_crash(),
         }
     }
@@ -86,6 +94,9 @@ impl RustafarianDrone {
         self.neighbors.insert(node_id, neighbor);
     }
 
+    fn remove_sender(&mut self, node_id: u8) {
+
+    }
     fn make_crash(&mut self) {
         self.crashed = true;
     }
