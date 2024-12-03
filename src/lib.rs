@@ -2,13 +2,16 @@
 use crossbeam_channel::{select_biased, unbounded, Receiver, Sender};
 use std::collections::{HashMap, HashSet};
 use std::{fs, thread};
+use std::ops::Index;
 use wg_2024::config::Config;
 use wg_2024::controller::{DroneCommand, DroneEvent};
 use wg_2024::drone::Drone;
 use wg_2024::network::{NodeId, SourceRoutingHeader};
-use wg_2024::packet::{FloodRequest, FloodResponse, NodeType};
+use wg_2024::packet::{FloodRequest, FloodResponse, NackType, NodeType};
 use wg_2024::packet::{Packet, PacketType};
 use rand::*;
+use wg_2024::packet::PacketType::Nack;
+
 
 pub struct RustafarianDrone {
     id: NodeId,
@@ -16,8 +19,7 @@ pub struct RustafarianDrone {
     controller_recv: Receiver<DroneCommand>,
     packet_recv: Receiver<Packet>,
     pdr: f32,
-    // Packet send in Drone interface
-    neighbors: HashMap<NodeId, Sender<Packet>>,
+    neighbors: HashMap<NodeId, Sender<Packet>>, // Packet send in Drone interface
     flood_requests: HashSet<u64>, // Contains: O(1) in average
     crashed: bool,
 }
@@ -67,10 +69,10 @@ impl Drone for RustafarianDrone {
 
 impl RustafarianDrone {
     fn handle_packet(&mut self, packet: Packet) {
-        match packet.pack_type {
-            PacketType::Nack(_nack) => todo!(),
-            PacketType::Ack(_ack) => todo!(),
-            PacketType::MsgFragment(_fragment) => todo!(),
+        match packet.clone().pack_type {
+            PacketType::Nack(_nack) => self.forward_packet(packet, true),
+            PacketType::Ack(_ack) => self.forward_packet(packet, true),
+            PacketType::MsgFragment(_fragment) => self.forward_packet(packet, false),
             PacketType::FloodRequest(_flood_request) => {
                 println!("Flood request arrived at {:?}", self.id);
                 self.handle_flood_req(_flood_request, packet.session_id, packet.routing_header);
@@ -109,12 +111,13 @@ impl RustafarianDrone {
         return rand::thread_rng().gen_range(0.0..100.0) < self.pdr;
     }
 
-    fn forward_packet(&mut self, packet: Packet) {
+    fn forward_packet(&mut self, packet: Packet, skip_pdr_check: bool) {
         // Step 1: check I'm the intended receiver
         let curr_hop = packet.routing_header.hops[packet.routing_header.hop_index];
         if self.id != curr_hop {
             // Error, I'm not the one who's supposed to receive this
-            todo!();
+            self.send_nack(packet, NackType::UnexpectedRecipient(self.id));
+            return;
         }
 
         let mut new_packet = packet.clone();
@@ -125,34 +128,93 @@ impl RustafarianDrone {
         // Step 3: check I'm not the last hop
         if next_hop_index >= packet.routing_header.hops.len() {
             // Error, I'm the last hop!
-            todo!();
+            self.send_nack(packet, NackType::DestinationIsDrone);
+            return;
         }
         
-        // Step 4: Check I have the next hop as neighbor
+        self.send_packet(new_packet, skip_pdr_check);
+    }
+
+    fn send_packet(&mut self, packet: Packet, skip_pdr_check: bool) -> bool {
+
+        let mut result = false;
+
+        let next_hop_index = packet.routing_header.hop_index;
+        // Check I have the next hop as neighbor
         let next_hop = packet.routing_header.hops[next_hop_index];
 
         match self.neighbors.get(&next_hop) {
             Some(channel) => {
-                // Step 4.5: Check Packet Drop Rate
 
-                if self.should_drop() {
-                    // Send nack
-                    todo!();
-                    return;
+                // Check if packet can be dropped, if so check the PDR
+                if !skip_pdr_check && self.should_drop() {
+
+                    self.send_nack(packet.clone(), NackType::Dropped);
+                    // Notify controller that a packet has been dropped
+                    self.controller_send.send(DroneEvent::PacketDropped(packet));
+
+                    return false;
                 }
 
-                match channel.send(new_packet) {
-                    Ok(()) => {},
+                match channel.send(packet.clone()) {
+                    Ok(()) => {
+                        // Notify controller that a packet has been correctly sent
+                        self.controller_send.send(DroneEvent::PacketSent(packet));
+                        result = true;
+                    },
                     Err(error) => {
-                        // Error, I can't send the message
-                        todo!();
+                        // Should never reach this error, SC should prevent it
+                        println!("Error while sending packet on closed channel");
+                        self.send_nack(packet, NackType::ErrorInRouting(next_hop))
                     }
                 }
             },
             None => {
-                // Error, I don't have that node
-                todo!();
+                self.send_nack(packet, NackType::ErrorInRouting(next_hop))
             }
+        }
+        result
+    }
+
+    fn send_nack(&mut self, packet: Packet, nack_type: NackType) {
+
+        // Get index for the current node
+        let self_index = packet
+            .routing_header
+            .hops
+            .iter()
+            .position(|id| id == &self.id).unwrap();
+
+
+        let mut route: Vec<u8> = packet.clone()
+            .routing_header
+            .hops
+            .split_at(self_index)
+            .0
+            .clone()
+            .into_iter()
+            .collect();
+        route.reverse();
+
+        let routing_header = SourceRoutingHeader{
+            hop_index : 1,
+            hops : route
+        };
+
+        let nack = wg_2024::packet::Nack{
+            fragment_index: 0,
+            nack_type
+        };
+
+        let packet = Packet{
+            pack_type: Nack(nack),
+            routing_header,
+            session_id: packet.session_id
+        };
+
+        if !self.send_packet(packet.clone(), true) {
+            // Nack can't be forwarded, send it to SC
+            self.controller_send.send(DroneEvent::ControllerShortcut(packet));
         }
     }
 
