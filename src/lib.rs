@@ -11,17 +11,17 @@ use wg_2024::packet::{FloodRequest, FloodResponse, NackType, NodeType};
 use wg_2024::packet::{Packet, PacketType};
 use rand::*;
 use wg_2024::packet::PacketType::Nack;
-
+mod tests;
 
 pub struct RustafarianDrone {
-    id: NodeId,
-    controller_send: Sender<DroneEvent>,
-    controller_recv: Receiver<DroneCommand>,
-    packet_recv: Receiver<Packet>,
-    pdr: f32,
-    neighbors: HashMap<NodeId, Sender<Packet>>, // Packet send in Drone interface
+    id: NodeId, // The ID of the drone, u8
+    controller_send: Sender<DroneEvent>, // Send messages to the Sim Controller
+    controller_recv: Receiver<DroneCommand>, // Receive messages from the Sim Controller
+    packet_recv: Receiver<Packet>, // Receive messages from other drones
+    pdr: f32, // Packet Drop Rate
+    neighbors: HashMap<NodeId, Sender<Packet>>, // Map containing the neighbors of the current drone. The key is the ID of the neighbor, the value is the channel
     flood_requests: HashSet<u64>, // Contains: O(1) in average
-    crashed: bool,
+    crashed: bool, // Whether the drone is crashed
 }
 
 impl Drone for RustafarianDrone {
@@ -58,6 +58,7 @@ impl Drone for RustafarianDrone {
                     }
                 }
                 recv(self.packet_recv) -> packet => {
+                    println!("Received packet: {:?}", packet);
                     if let Ok(packet) = packet {
                         self.handle_packet(packet);
                     }
@@ -68,7 +69,11 @@ impl Drone for RustafarianDrone {
 }
 
 impl RustafarianDrone {
+    /**
+     * Handle packets that arrive from other drones.
+     */
     fn handle_packet(&mut self, packet: Packet) {
+        // Packets are cloned before the handle otherwise they get consumed by the arms execution
         match packet.clone().pack_type {
             PacketType::Nack(_nack) => self.forward_packet(packet, true),
             PacketType::Ack(_ack) => self.forward_packet(packet, true),
@@ -83,6 +88,9 @@ impl RustafarianDrone {
         }
     }
 
+    /**
+     * Handle commands from the Simulation Controller
+     */
     fn handle_command(&mut self, command: DroneCommand) {
         match command {
             DroneCommand::AddSender(node_id, sender) => self.add_neighbor(node_id, sender),
@@ -92,26 +100,53 @@ impl RustafarianDrone {
         }
     }
 
+    /**
+     * Add a neighbor to the list, can only be called by the sim controller.
+     * node_id: The ID for the new node;
+     * neighbor: The sender channel for the new node.
+     */
     fn add_neighbor(&mut self, node_id: u8, neighbor: Sender<Packet>) {
         self.neighbors.insert(node_id, neighbor);
     }
 
+    /**
+     * Remove a node from the neighbors using the ID. Can only be called by the sim controller.
+     */
     fn remove_sender(&mut self, node_id: u8) {
-
+        self.neighbors.remove(&node_id);
     }
+
+    /**
+     * Set the status of the drone as crashed. Can only be called by the sim controller
+     */
     fn make_crash(&mut self) {
         self.crashed = true;
     }
 
+    /**
+     * Change the packet drop rate. Can only be called by the sim controller.
+     */
     fn set_packet_drop_rate(&mut self, pdr: f32) {
         self.pdr = pdr;
     }
 
+    /**
+     * Check whether the packet should be dropped, using a random number and the Packet Drop Rate.
+     * Returns true if the packet should be dropped, false otherwise.
+     */
     fn should_drop(&self) -> bool {
-        return rand::thread_rng().gen_range(0.0..100.0) < self.pdr;
+        return rand::thread_rng().gen_range(0.0..1.0) < self.pdr;
     }
 
+    /**
+     * Forwards a packet to the next node, doing checks such as:
+     * 1. The current drone is the intended receiver
+     * 2. Check that the drone is not the last hop
+     * packet: the packet to forward;
+     * skip_pdr_check: If it should skip the check for the Packet Drop Rate before sending. True for ACKs, NACKs, Flood messages.
+     */
     fn forward_packet(&mut self, packet: Packet, skip_pdr_check: bool) {
+        println!("Forwarding packet: {:?}, skip_pdr_check: {}", packet, skip_pdr_check);
         // Step 1: check I'm the intended receiver
         let curr_hop = packet.routing_header.hops[packet.routing_header.hop_index];
         if self.id != curr_hop {
@@ -135,7 +170,15 @@ impl RustafarianDrone {
         self.send_packet(new_packet, skip_pdr_check);
     }
 
+    /**
+     * Send a packet to the target's channel. The target is the next node in the routing header.
+     * Packet: the packet to send.
+     * Skip_pdr_check: whether the check for the drop of the packet should be skipped. Only the fragments can be lost,
+     * so it's true for ACKs, NACKs, flooding messages
+     * Return true if the packet was sent successfully, false otherwise.
+     */
     fn send_packet(&mut self, packet: Packet, skip_pdr_check: bool) -> bool {
+        println!("Sending packet: {:?}, skip_pdr_check: {}", packet, skip_pdr_check);
 
         let mut result = false;
 
@@ -170,14 +213,21 @@ impl RustafarianDrone {
                 }
             },
             None => {
+                // Next hop is not my neighbour
                 self.send_nack(packet, NackType::ErrorInRouting(next_hop))
             }
         }
         result
     }
 
+    /**
+     * Send a NACK packet to the previous node. 
+     * The target is taken by reversing the routing header, starting from the current hop.
+     * Packet: the packet that couldn't be sent;
+     * nack_type: what cause the packet to be lost (Drop, Error in routing...)
+     */
     fn send_nack(&mut self, packet: Packet, nack_type: NackType) {
-
+        println!("Sending nack for packet: {:?}, NackType: {:?}", packet, nack_type);
         // Get index for the current node
         let self_index = packet
             .routing_header
@@ -189,9 +239,10 @@ impl RustafarianDrone {
         let mut route: Vec<u8> = packet.clone()
             .routing_header
             .hops;
-        route.truncate(self_index);
+        route.truncate(self_index + 1);
         route.reverse();
 
+        // Build the packet
         let routing_header = SourceRoutingHeader{
             hop_index : 1,
             hops : route
@@ -281,6 +332,8 @@ impl RustafarianDrone {
             for neighbor in &self.neighbors {
                 let neighbor_id = neighbor.0;
                 let neighbor_channel = neighbor.1;
+
+                // Avoid sending to the node that send the request to us
                 if neighbor_id == &last_node {
                     continue;
                 }
@@ -296,4 +349,8 @@ impl RustafarianDrone {
             }
         }
     }
+}
+
+fn log(msg: String) {
+    println!("{}", msg);
 }
