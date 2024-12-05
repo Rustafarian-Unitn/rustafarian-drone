@@ -145,7 +145,7 @@ impl RustafarianDrone {
      * skip_pdr_check: If it should skip the check for the Packet Drop Rate before sending. True for ACKs, NACKs, Flood messages.
      */
     fn forward_packet(&mut self, packet: Packet, skip_pdr_check: bool, fragment_index: u64) {
-        println!("Forwarding packet: {:?}", packet);
+        // println!("Forwarding packet: {:?}", packet);
         // Step 1: check I'm the intended receiver
         let curr_hop = packet.routing_header.hops[packet.routing_header.hop_index];
         if self.id != curr_hop {
@@ -173,9 +173,20 @@ impl RustafarianDrone {
                 fragment_index
             };
 
+            let self_index = packet
+            .routing_header
+            .hops
+            .iter()
+            .position(|id| id == &self.id).unwrap();
+
+            let mut route: Vec<u8> = packet.clone()
+            .routing_header
+            .hops;
+            route.truncate(self_index + 1);
+            route.reverse();
             let routing_header = SourceRoutingHeader {
                 hop_index: 1,
-                hops: [self.id, packet.routing_header.hops[packet.routing_header.hop_index - 1]].to_vec()
+                hops: route
             };
 
             let ack_packet = Packet {
@@ -184,7 +195,6 @@ impl RustafarianDrone {
                 routing_header
             };
 
-            println!("{:?}", ack_packet);   
             
             self.send_packet(ack_packet, true, 0);
         }
@@ -198,13 +208,13 @@ impl RustafarianDrone {
      * Return true if the packet was sent successfully, false otherwise.
      */
     fn send_packet(&mut self, packet: Packet, skip_pdr_check: bool, fragment_index: u64) -> bool {
-        println!("Sending packet: {:?}", packet);
         let mut result = false;
-
+        
         let next_hop_index = packet.routing_header.hop_index;
         // Check I have the next hop as neighbor
-        println!("{:?}", packet.routing_header.hops);
         let next_hop = packet.routing_header.hops[next_hop_index];
+        
+        // println!("I am {:?} Sending packet to: {:?}", self.id,next_hop );
 
         match self.neighbors.get(&next_hop) {
             Some(channel) => {
@@ -224,7 +234,7 @@ impl RustafarianDrone {
                         // Notify controller that a packet has been correctly sent
                         self.controller_send.send(DroneEvent::PacketSent(packet));
                         result = true;
-                        println!("Sent");
+                        // println!("Sent");
                     },
                     Err(error) => {
                         // Should never reach this error, SC should prevent it

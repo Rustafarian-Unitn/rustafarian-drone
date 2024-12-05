@@ -19,10 +19,10 @@ fn run_fragment_forward() {
     tests::generic_fragment_forward::<RustafarianDrone>();
 }
 
-// #[test]
-// fn run_chain_fragment_ack() {
-//     tests::generic_chain_fragment_ack::<RustafarianDrone>();
-// }
+#[test]
+fn run_chain_fragment_ack() {
+    tests::generic_chain_fragment_ack::<RustafarianDrone>();
+}
 
 #[test]
 fn run_chain_fragment_drop() {
