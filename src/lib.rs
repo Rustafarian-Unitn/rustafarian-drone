@@ -145,7 +145,6 @@ impl RustafarianDrone {
      * skip_pdr_check: If it should skip the check for the Packet Drop Rate before sending. True for ACKs, NACKs, Flood messages.
      */
     fn forward_packet(&mut self, packet: Packet, skip_pdr_check: bool, fragment_index: u64) {
-        // println!("Forwarding packet: {:?}", packet);
         // Step 1: check I'm the intended receiver
         let curr_hop = packet.routing_header.hops[packet.routing_header.hop_index];
         if self.id != curr_hop {
@@ -157,6 +156,7 @@ impl RustafarianDrone {
         let mut new_packet = packet.clone();
         // Step 2: increase the hop index
         new_packet.routing_header.hop_index += 1;
+
         let next_hop_index = new_packet.routing_header.hop_index;
         
         // Step 3: check I'm not the last hop
@@ -211,11 +211,16 @@ impl RustafarianDrone {
         let mut result = false;
         
         let next_hop_index = packet.routing_header.hop_index;
+        
+        // Check if the next_hop_index is valid
+        if next_hop_index >= packet.routing_header.hops.len() {
+            println!("Error: next_hop_index ({}) >= packet.routing_header.hops.len() ({})", next_hop_index, packet.routing_header.hop_index);
+            return false;
+        }
+
         // Check I have the next hop as neighbor
         let next_hop = packet.routing_header.hops[next_hop_index];
         
-        // println!("I am {:?} Sending packet to: {:?}", self.id,next_hop );
-
         match self.neighbors.get(&next_hop) {
             Some(channel) => {
 
@@ -248,6 +253,7 @@ impl RustafarianDrone {
                 self.send_nack_fragment(packet, NackType::ErrorInRouting(next_hop), fragment_index)
             }
         }
+    
         result
     }
 
