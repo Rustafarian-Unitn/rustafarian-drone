@@ -173,30 +173,7 @@ impl RustafarianDrone {
                 fragment_index
             };
 
-            let self_index = packet
-            .routing_header
-            .hops
-            .iter()
-            .position(|id| id == &self.id).unwrap();
-
-            let mut route: Vec<u8> = packet.clone()
-            .routing_header
-            .hops;
-            route.truncate(self_index + 1);
-            route.reverse();
-            let routing_header = SourceRoutingHeader {
-                hop_index: 1,
-                hops: route
-            };
-
-            let ack_packet = Packet {
-                pack_type: PacketType::Ack(ack),
-                session_id: packet.session_id,
-                routing_header
-            };
-
-            
-            self.send_packet(ack_packet, true, 0);
+            self.send_back(packet, PacketType::Ack(ack));
         }
     }
 
@@ -265,37 +242,13 @@ impl RustafarianDrone {
      */
     fn send_nack_fragment(&mut self, packet: Packet, nack_type: NackType, fragment_index: u64) {
         // Get index for the current node
-        let self_index = packet
-            .routing_header
-            .hops
-            .iter()
-            .position(|id| id == &self.id).unwrap();
-
-
-        let mut route: Vec<u8> = packet.clone()
-            .routing_header
-            .hops;
-        route.truncate(self_index + 1);
-        route.reverse();
-
-        // Build the packet
-        let routing_header = SourceRoutingHeader{
-            hop_index : 1,
-            hops : route
-        };
-
+     
         let nack = wg_2024::packet::Nack{
             fragment_index: fragment_index,
             nack_type
         };
 
-        let packet = Packet{
-            pack_type: Nack(nack),
-            routing_header,
-            session_id: packet.session_id
-        };
-
-        if !self.send_packet(packet.clone(), true, fragment_index) {
+        if !self.send_back(packet.clone(), PacketType::Nack(nack)) {
             // Nack can't be forwarded, send it to SC
             self.controller_send.send(DroneEvent::ControllerShortcut(packet));
         }
@@ -392,6 +345,33 @@ impl RustafarianDrone {
                 }
             }
         }
+    }
+
+    fn send_back(&mut self, acked_packet: Packet, acknowledgment: PacketType) -> bool {
+        let self_index = acked_packet
+            .routing_header
+            .hops
+            .iter()
+            .position(|id| id == &self.id).unwrap();
+
+        let mut route: Vec<u8> = acked_packet.clone()
+            .routing_header
+            .hops;
+        route.truncate(self_index + 1);
+        route.reverse();
+
+        let routing_header = SourceRoutingHeader {
+            hop_index: 1,
+            hops: route
+        };
+
+        let new_packet = Packet {
+            pack_type: acknowledgment,
+            session_id: acked_packet.session_id,
+            routing_header
+        };
+
+        self.send_packet(new_packet, true, 0)
     }
 }
 
