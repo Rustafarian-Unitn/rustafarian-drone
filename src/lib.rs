@@ -71,10 +71,7 @@ impl RustafarianDrone {
         // Packets are cloned before the handle otherwise they get consumed by the arms execution
         let pack_type = packet.pack_type.clone();
         match pack_type {
-            PacketType::Nack(_nack) => {
-                println!("Received nack, forwarding it.");
-                self.forward_packet(packet, true, 0)
-            }
+            PacketType::Nack(_nack) => self.forward_packet(packet, true, 0),
             PacketType::Ack(_ack) => self.forward_packet(packet, true, 0),
             PacketType::MsgFragment(_fragment) => {
                 if self.crashed {
@@ -89,11 +86,11 @@ impl RustafarianDrone {
                 self.forward_packet(packet, false, _fragment.fragment_index)
             }
             PacketType::FloodRequest(_flood_request) => {
-                println!("Flood request arrived at {:?}", self.id);
                 self.handle_flood_req(_flood_request, packet.session_id, packet.routing_header);
             }
             PacketType::FloodResponse(_flood_response) => {
-                println!("Flood response arrived at {:?}", self.id);
+                // If the packet is a flood response, we just forward it
+                self.forward_packet(packet, false, 0);
             }
         }
     }
@@ -240,6 +237,8 @@ impl RustafarianDrone {
                     Err(error) => {
                         // Should never reach this error, SC should prevent it
                         println!("Error while sending packet on closed channel");
+                        self.controller_send
+                            .send(DroneEvent::ControllerShortcut(packet.clone()));
 
                         self.send_nack_fragment(
                             packet,
@@ -332,10 +331,15 @@ impl RustafarianDrone {
                 },
             };
 
+            let copy_for_sc = new_packet.clone();
+
             match self.neighbors.get(&sender_id) {
                 Some(channel) => match channel.send(new_packet) {
                     Ok(()) => {}
-                    Err(error) => println!("Couldn't send response, as the neighbor has crashed"),
+                    Err(error) => {
+                        // No message sent to SC. Crashed neighbours should not be in the topology
+                        println!("Couldn't send response, as the neighbor has crashed")
+                    }
                 },
                 _ => {}
             }
@@ -367,6 +371,7 @@ impl RustafarianDrone {
                     session_id,
                 }) {
                     Ok(()) => {}
+                    // No message sent to SC. Crashed neighbours should not be in the topology
                     Err(error) => println!("Couldn't send response, as the neighbor has crashed"),
                 }
             }
