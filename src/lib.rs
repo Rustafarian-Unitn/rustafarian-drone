@@ -313,8 +313,7 @@ impl RustafarianDrone {
                 .push((self.id, NodeType::Drone));
             let mut route: Vec<u8> = flood_request_clone
                 .path_trace
-                .clone()
-                .into_iter()
+                .iter()
                 .map(|node| node.0)
                 .collect();
             route.reverse();
@@ -372,16 +371,7 @@ impl RustafarianDrone {
     }
 
     fn send_back(&mut self, acked_packet: &Packet, acknowledgment: PacketType) -> bool {
-        let self_index = acked_packet
-            .routing_header
-            .hops
-            .iter()
-            .position(|id| id == &self.id)
-            .unwrap();
-
-        let mut route: Vec<u8> = acked_packet.clone().routing_header.hops;
-        route.truncate(self_index + 1);
-        route.reverse();
+        let route = self.reverse_route(&acked_packet.routing_header);
 
         let routing_header = SourceRoutingHeader {
             hop_index: 1,
@@ -395,6 +385,17 @@ impl RustafarianDrone {
         };
 
         self.send_packet(&new_packet, true, 0)
+    }
+
+    fn reverse_route(&self, header: &SourceRoutingHeader) -> Vec<u8> {
+        if let Some(self_index) = header.hops.iter().position(|id| id == &self.id) {
+            let mut route: Vec<u8> = header.hops.clone();
+            route.truncate(self_index + 1);
+            route.reverse();
+            route
+        } else {
+            vec![]
+        }
     }
 }
 
