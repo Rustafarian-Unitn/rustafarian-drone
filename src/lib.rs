@@ -144,7 +144,7 @@ impl RustafarianDrone {
      * packet: the packet to forward;
      * skip_pdr_check: If it should skip the check for the Packet Drop Rate before sending. True for ACKs, NACKs, Flood messages.
      */
-    fn forward_packet(&mut self, packet: Packet, skip_pdr_check: bool, fragment_index: u64) {
+    fn forward_packet(&mut self,mut packet: Packet, skip_pdr_check: bool, fragment_index: u64) {
         // Step 1: check I'm the intended receiver
         let curr_hop = packet.routing_header.hops[packet.routing_header.hop_index];
         if self.id != curr_hop {
@@ -155,9 +155,9 @@ impl RustafarianDrone {
 
         let mut new_packet = packet.clone();
         // Step 2: increase the hop index
-        new_packet.routing_header.hop_index += 1;
+        packet.routing_header.hop_index += 1;
 
-        let next_hop_index = new_packet.routing_header.hop_index;
+        let next_hop_index = packet.routing_header.hop_index;
         
         // Step 3: check I'm not the last hop
         if next_hop_index >= packet.routing_header.hops.len() {
@@ -167,7 +167,7 @@ impl RustafarianDrone {
         }
         
         // Skip_pdr_check: true only for ACK and NACK, so in those two cases we don't send the ACK back to the sender.
-        if self.send_packet(new_packet, skip_pdr_check, fragment_index) && !skip_pdr_check {
+        if self.send_packet(packet.clone(), skip_pdr_check, fragment_index) && !skip_pdr_check {
             // TODO: send ACK to previous hop in the list. 
             let ack = Ack {
                 fragment_index
@@ -184,7 +184,7 @@ impl RustafarianDrone {
      * so it's true for ACKs, NACKs, flooding messages
      * Return true if the packet was sent successfully, false otherwise.
      */
-    fn send_packet(&mut self, packet: Packet, skip_pdr_check: bool, fragment_index: u64) -> bool {
+    fn send_packet(&mut self,mut packet: Packet, skip_pdr_check: bool, fragment_index: u64) -> bool {
         let mut result = false;
         
         let next_hop_index = packet.routing_header.hop_index;
@@ -204,7 +204,12 @@ impl RustafarianDrone {
                 // Check if packet can be dropped, if so check the PDR
                 if !skip_pdr_check && self.should_drop() {
 
-                    self.send_nack_fragment(packet.clone(), NackType::Dropped, fragment_index);
+                    let nack = wg_2024::packet::Nack{
+                        fragment_index: fragment_index,
+                        nack_type: NackType::Dropped
+                    };
+
+                    self.send_back(packet.clone(), PacketType::Nack(nack));
                     // Notify controller that a packet has been dropped
                     self.controller_send.send(DroneEvent::PacketDropped(packet));
 
@@ -221,13 +226,23 @@ impl RustafarianDrone {
                     Err(error) => {
                         // Should never reach this error, SC should prevent it
                         println!("Error while sending packet on closed channel");
-                        self.send_nack_fragment(packet, NackType::ErrorInRouting(next_hop), fragment_index)
+                        let nack = wg_2024::packet::Nack{
+                            fragment_index: fragment_index,
+                            nack_type: NackType::ErrorInRouting(next_hop)
+                        };
+    
+                        self.send_back(packet, PacketType::Nack(nack));
                     }
                 }
             },
             None => {
                 // Next hop is not my neighbour
-                self.send_nack_fragment(packet, NackType::ErrorInRouting(next_hop), fragment_index)
+                let nack = wg_2024::packet::Nack{
+                    fragment_index: fragment_index,
+                    nack_type: NackType::ErrorInRouting(next_hop)
+                };
+
+                self.send_back(packet, PacketType::Nack(nack));
             }
         }
     
