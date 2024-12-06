@@ -71,9 +71,9 @@ impl RustafarianDrone {
     /**
      * Handle packets that arrive from other drones.
      */
-    fn handle_packet(&mut self, packet: Packet) {
+    fn handle_packet(&mut self, mut packet: Packet) {
         // Packets are cloned before the handle otherwise they get consumed by the arms execution
-        let pack_type = &packet.pack_type;
+        let pack_type = packet.pack_type.clone();
         match pack_type {
             PacketType::Nack(_nack) => self.forward_packet(&packet, true, 0),
             PacketType::Ack(_ack) => self.forward_packet(&packet, true, 0),
@@ -152,6 +152,12 @@ impl RustafarianDrone {
         let curr_hop = packet.routing_header.hops[packet.routing_header.hop_index];
         if self.id != curr_hop {
             // Error, I'm not the one who's supposed to receive this
+            let nack = wg_2024::packet::Nack {
+                fragment_index,
+                nack_type: NackType::UnexpectedRecipient(self.id),
+            };
+
+            self.send_back(packet, PacketType::Nack(nack));
             self.send_nack_fragment(
                 packet,
                 NackType::UnexpectedRecipient(self.id),
@@ -169,7 +175,13 @@ impl RustafarianDrone {
         // Step 3: check I'm not the last hop
         if next_hop_index >= packet.routing_header.hops.len() {
             // Error, I'm the last hop!
-            self.send_nack_fragment(packet, NackType::DestinationIsDrone, fragment_index);
+
+            let nack = wg_2024::packet::Nack {
+                fragment_index,
+                nack_type: NackType::DestinationIsDrone,
+            };
+
+            self.send_back(packet, PacketType::Nack(nack));
             return;
         }
 
@@ -296,23 +308,21 @@ impl RustafarianDrone {
      */
     pub fn handle_flood_req(
         &mut self,
-        packet: &FloodRequest,
+        mut packet: FloodRequest,
         session_id: u64,
-        routing_header: SourceRoutingHeader,
+        mut routing_header: SourceRoutingHeader,
     ) {
         // If we have the ID in memory, and the path trace contains our ID
         // Request already handled, prepare response
         /** && packet.clone().path_trace.iter().any(|node| node.0 == self.id) */
         if self.flood_requests.contains(&packet.flood_id) {
-            let mut flood_request_clone = packet.clone();
             // Get the ID of the drone that sent the request
-            let sender_id = flood_request_clone.path_trace.last().unwrap().0;
+            let sender_id = packet.path_trace.last().unwrap().0;
             // Add myself to the path trace
-            flood_request_clone
-                .path_trace
+            packet.path_trace
                 .push((self.id, NodeType::Drone));
-            let mut route: Vec<u8> = flood_request_clone
-                .path_trace
+            
+            let mut route: Vec<u8> = packet.path_trace
                 .iter()
                 .map(|node| node.0)
                 .collect();
@@ -320,7 +330,7 @@ impl RustafarianDrone {
 
             let response = FloodResponse {
                 flood_id: packet.flood_id,
-                path_trace: flood_request_clone.path_trace,
+                path_trace: packet.path_trace,
             };
 
             // Create the packet with the route provided in the path trace
@@ -342,11 +352,10 @@ impl RustafarianDrone {
             }
         } else {
             // Send to neighbors
-            let mut new_packet = packet.clone();
             // Save the last node's ID, we don't want to send the request to it
-            let last_node = (new_packet.path_trace.last().unwrap().0);
+            let last_node = (packet.path_trace.last().unwrap().0);
             // Add our ID to the trace
-            new_packet.path_trace.push((self.id, NodeType::Drone));
+            packet.path_trace.push((self.id, NodeType::Drone));
 
             // Send to all neighbors
             for neighbor in &self.neighbors {
@@ -359,7 +368,7 @@ impl RustafarianDrone {
                 }
 
                 match neighbor_channel.send(Packet {
-                    pack_type: PacketType::FloodRequest(new_packet.clone()),
+                    pack_type: PacketType::FloodRequest(packet.clone()),
                     routing_header: routing_header.clone(),
                     session_id,
                 }) {
