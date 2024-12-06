@@ -50,10 +50,6 @@ impl Drone for RustafarianDrone {
             select_biased! {
                 recv(self.controller_recv) -> command => {
                     if let Ok(command) = command {
-                        if let DroneCommand::Crash = command {
-                            println!("drone {} crashed", self.id);
-                            break;
-                        }
                         self.handle_command(command);
                     }
                 }
@@ -75,10 +71,18 @@ impl RustafarianDrone {
         // Packets are cloned before the handle otherwise they get consumed by the arms execution
         let pack_type = packet.pack_type.clone();
         match pack_type {
-            PacketType::Nack(_nack) => self.forward_packet(&packet, true, 0),
-            PacketType::Ack(_ack) => self.forward_packet(&packet, true, 0),
+            PacketType::Nack(_nack) => {
+                println!("Received nack, forwarding it.");
+                self.forward_packet(packet, true, 0)
+            },
+            PacketType::Ack(_ack) => self.forward_packet(packet, true, 0),
             PacketType::MsgFragment(_fragment) => {
-                self.forward_packet(&packet, false, _fragment.fragment_index)
+                if self.crashed {
+                    self.send_nack_fragment(packet, NackType::ErrorInRouting(self.id), _fragment.fragment_index);
+                    return;
+                }
+                
+                self.forward_packet(packet, false, _fragment.fragment_index)
             }
             PacketType::FloodRequest(_flood_request) => {
                 println!("Flood request arrived at {:?}", self.id);
@@ -123,6 +127,7 @@ impl RustafarianDrone {
      */
     fn make_crash(&mut self) {
         self.crashed = true;
+        self.neighbors.clear();
     }
 
     /**
@@ -147,7 +152,7 @@ impl RustafarianDrone {
      * packet: the packet to forward;
      * skip_pdr_check: If it should skip the check for the Packet Drop Rate before sending. True for ACKs, NACKs, Flood messages.
      */
-    fn forward_packet(&mut self, packet: &Packet, skip_pdr_check: bool, fragment_index: u64) {
+    fn forward_packet(&mut self, mut packet: Packet, skip_pdr_check: bool, fragment_index: u64) {
         // Step 1: check I'm the intended receiver
         let curr_hop = packet.routing_header.hops[packet.routing_header.hop_index];
         if self.id != curr_hop {
@@ -157,7 +162,7 @@ impl RustafarianDrone {
                 nack_type: NackType::UnexpectedRecipient(self.id),
             };
 
-            self.send_back(packet, PacketType::Nack(nack));
+            self.send_back(&mut packet, PacketType::Nack(nack));
             self.send_nack_fragment(
                 packet,
                 NackType::UnexpectedRecipient(self.id),
@@ -165,15 +170,16 @@ impl RustafarianDrone {
             );
             return;
         }
+        
 
         let mut new_packet = packet.clone();
         // Step 2: increase the hop index
         new_packet.routing_header.hop_index += 1;
 
-        let next_hop_index = packet.routing_header.hop_index;
+        let next_hop_index = new_packet.routing_header.hop_index;
 
         // Step 3: check I'm not the last hop
-        if next_hop_index >= packet.routing_header.hops.len() {
+        if next_hop_index >= new_packet.routing_header.hops.len() {
             // Error, I'm the last hop!
 
             let nack = wg_2024::packet::Nack {
@@ -181,17 +187,14 @@ impl RustafarianDrone {
                 nack_type: NackType::DestinationIsDrone,
             };
 
-            self.send_back(packet, PacketType::Nack(nack));
+            self.send_back(&mut packet, PacketType::Nack(nack));
             return;
         }
 
         // Skip_pdr_check: true only for ACK and NACK, so in those two cases we don't send the ACK back to the sender.
-        if self.send_packet(&new_packet, skip_pdr_check, fragment_index) && !skip_pdr_check {
-            // TODO: send ACK to previous hop in the list.
-            let ack = Ack { fragment_index };
-
-            self.send_back(packet, PacketType::Ack(ack));
-        }
+        println!("Sending packet {:?}", new_packet);
+        self.send_packet(new_packet, skip_pdr_check, fragment_index);
+        // TODO: send PacketSent event to the controller
     }
 
     /**
@@ -201,7 +204,7 @@ impl RustafarianDrone {
      * so it's true for ACKs, NACKs, flooding messages
      * Return true if the packet was sent successfully, false otherwise.
      */
-    fn send_packet(&mut self, packet: &Packet, skip_pdr_check: bool, fragment_index: u64) -> bool {
+    fn send_packet(&mut self, mut packet: Packet, skip_pdr_check: bool, fragment_index: u64) -> bool {
         let mut result = false;
 
         let next_hop_index = packet.routing_header.hop_index;
@@ -227,42 +230,37 @@ impl RustafarianDrone {
                         nack_type: NackType::Dropped,
                     };
 
-                    self.send_back(packet, PacketType::Nack(nack));
+                    self.send_nack_fragment( packet.clone(), NackType::Dropped, fragment_index);
                     // Notify controller that a packet has been dropped
                     self.controller_send
-                        .send(DroneEvent::PacketDropped(packet.clone()));
+                        .send(DroneEvent::PacketDropped(packet));
 
                     return false;
                 }
 
+                // Clone needed because we then needs to send it as part of the PacketSent event
                 match channel.send(packet.clone()) {
                     Ok(()) => {
                         // Notify controller that a packet has been correctly sent
                         self.controller_send
-                            .send(DroneEvent::PacketSent(packet.clone()));
+                            .send(DroneEvent::PacketSent(packet));
                         result = true;
                         // println!("Sent");
                     }
                     Err(error) => {
                         // Should never reach this error, SC should prevent it
                         println!("Error while sending packet on closed channel");
-                        let nack = wg_2024::packet::Nack {
-                            fragment_index,
-                            nack_type: NackType::ErrorInRouting(next_hop),
-                        };
-
-                        self.send_back(packet, PacketType::Nack(nack));
+               
+                        self.send_nack_fragment(packet, NackType::ErrorInRouting(next_hop), fragment_index);
                     }
                 }
             }
             None => {
+                println!("Error: next_hop ({}) is not a neighbor of drone {}", next_hop, self.id);
                 // Next hop is not my neighbour
-                let nack = wg_2024::packet::Nack {
-                    fragment_index,
-                    nack_type: NackType::ErrorInRouting(next_hop),
-                };
 
-                self.send_back(packet, PacketType::Nack(nack));
+                self.send_nack_fragment(packet, NackType::ErrorInRouting(next_hop), fragment_index);
+                // self.send_back(&mut packet, PacketType::Nack(nack));
             }
         }
 
@@ -275,7 +273,7 @@ impl RustafarianDrone {
      * Packet: the packet that couldn't be sent;
      * nack_type: what cause the packet to be lost (Drop, Error in routing...)
      */
-    fn send_nack_fragment(&mut self, packet: &Packet, nack_type: NackType, fragment_index: u64) {
+    fn send_nack_fragment(&mut self, mut packet: Packet, nack_type: NackType, fragment_index: u64) {
         // Get index for the current node
 
         let nack = wg_2024::packet::Nack {
@@ -283,10 +281,10 @@ impl RustafarianDrone {
             nack_type,
         };
 
-        if !self.send_back(packet, PacketType::Nack(nack)) {
+        if !self.send_back(&mut packet, PacketType::Nack(nack)) {
             // Nack can't be forwarded, send it to SC
             self.controller_send
-                .send(DroneEvent::ControllerShortcut(packet.clone()));
+                .send(DroneEvent::ControllerShortcut(packet));
         }
     }
 
@@ -315,7 +313,8 @@ impl RustafarianDrone {
         // If we have the ID in memory, and the path trace contains our ID
         // Request already handled, prepare response
         /** && packet.clone().path_trace.iter().any(|node| node.0 == self.id) */
-        if self.flood_requests.contains(&packet.flood_id) {
+      
+        if self.flood_requests.contains(&packet.flood_id) && !self.crashed{
             // Get the ID of the drone that sent the request
             let sender_id = packet.path_trace.last().unwrap().0;
             // Add myself to the path trace
@@ -354,8 +353,12 @@ impl RustafarianDrone {
             // Send to neighbors
             // Save the last node's ID, we don't want to send the request to it
             let last_node = (packet.path_trace.last().unwrap().0);
-            // Add our ID to the trace
-            packet.path_trace.push((self.id, NodeType::Drone));
+            
+            // Only put myself in the path trace if I'm not crashed
+            if !self.crashed {
+                // Add our ID to the trace
+                packet.path_trace.push((self.id, NodeType::Drone));
+            }
 
             // Send to all neighbors
             for neighbor in &self.neighbors {
@@ -367,6 +370,7 @@ impl RustafarianDrone {
                     continue;
                 }
 
+                // The two clones here are required, since we are sending the same stuff to multiple nodes!
                 match neighbor_channel.send(Packet {
                     pack_type: PacketType::FloodRequest(packet.clone()),
                     routing_header: routing_header.clone(),
@@ -379,7 +383,7 @@ impl RustafarianDrone {
         }
     }
 
-    fn send_back(&mut self, acked_packet: &Packet, acknowledgment: PacketType) -> bool {
+    fn send_back(&mut self, acked_packet: &mut Packet, acknowledgment: PacketType) -> bool {
         let route = self.reverse_route(&acked_packet.routing_header);
 
         let routing_header = SourceRoutingHeader {
@@ -392,8 +396,8 @@ impl RustafarianDrone {
             session_id: acked_packet.session_id,
             routing_header,
         };
-
-        self.send_packet(&new_packet, true, 0)
+        println!("Sending {:?} back to {:?}", new_packet.clone(), new_packet.routing_header.hops[1]);
+        self.send_packet(new_packet, true, 0)
     }
 
     fn reverse_route(&self, header: &SourceRoutingHeader) -> Vec<u8> {
@@ -406,8 +410,4 @@ impl RustafarianDrone {
             vec![]
         }
     }
-}
-
-fn log(msg: String) {
-    println!("{}", msg);
 }
