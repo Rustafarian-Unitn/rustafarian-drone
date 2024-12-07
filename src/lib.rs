@@ -307,6 +307,7 @@ impl RustafarianDrone {
         // If we have the ID in memory, and the path trace contains our ID
         // Request already handled, prepare response
         /** && packet.clone().path_trace.iter().any(|node| node.0 == self.id) */
+        // println!("Handling flood request {:?}", packet);
         if self.flood_requests.contains(&packet.flood_id) && !self.crashed {
             // Get the ID of the drone that sent the request
             let sender_id = packet.path_trace.last().unwrap().0;
@@ -335,7 +336,9 @@ impl RustafarianDrone {
 
             match self.neighbors.get(&sender_id) {
                 Some(channel) => match channel.send(new_packet) {
-                    Ok(()) => {}
+                    Ok(()) => {
+                        println!("Sent response to {:?}", sender_id);
+                    }
                     Err(error) => {
                         // No message sent to SC. Crashed neighbours should not be in the topology
                         println!("Couldn't send response, as the neighbor has crashed")
