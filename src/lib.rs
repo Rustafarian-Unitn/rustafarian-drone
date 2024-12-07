@@ -177,7 +177,6 @@ impl RustafarianDrone {
         }
 
         // Skip_pdr_check: true only for ACK and NACK, so in those two cases we don't send the ACK back to the sender.
-        println!("Sending packet {:?}", new_packet);
         self.send_packet(new_packet, skip_pdr_check, fragment_index);
         // TODO: send PacketSent event to the controller
     }
@@ -315,7 +314,6 @@ impl RustafarianDrone {
         // Request already handled, prepare response
         // TODO Add this back?
         /** && packet.clone().path_trace.iter().any(|node| node.0 == self.id) */
-        // println!("Handling flood request {:?}", packet);
         if self.flood_requests.contains(&packet.flood_id) && !self.crashed {
             // Get the ID of the drone that sent the request
             let sender_id = packet.path_trace.last().unwrap().0;
@@ -365,6 +363,8 @@ impl RustafarianDrone {
                 packet.path_trace.push((self.id, NodeType::Drone));
             }
 
+            self.flood_requests.insert(packet.flood_id);
+
             // Send to all neighbors
             for neighbor in &self.neighbors {
                 let neighbor_id = neighbor.0;
@@ -412,11 +412,7 @@ impl RustafarianDrone {
             session_id: acked_packet.session_id,
             routing_header,
         };
-        println!(
-            "Sending {:?} back to {:?}",
-            new_packet.clone(),
-            new_packet.routing_header.hops[1]
-        );
+
         self.send_packet(new_packet, true, 0)
     }
 
