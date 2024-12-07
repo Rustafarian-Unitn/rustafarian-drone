@@ -90,7 +90,7 @@ impl RustafarianDrone {
             }
             PacketType::FloodResponse(_flood_response) => {
                 // If the packet is a flood response, we just forward it
-                self.forward_packet(packet, false, 0);
+                self.forward_packet(packet, true, 0);
             }
         }
     }
@@ -237,8 +237,13 @@ impl RustafarianDrone {
                     Err(error) => {
                         // Should never reach this error, SC should prevent it
                         println!("Error while sending packet on closed channel");
-                        self.controller_send
-                            .send(DroneEvent::ControllerShortcut(packet.clone()));
+
+                        // If true, it means packet is an ACK/NACK/FLOOD_RESP, so it should be
+                        // routed through the SC in order to reach it's destination
+                        if skip_pdr_check {
+                            self.controller_send
+                                .send(DroneEvent::ControllerShortcut(packet.clone()));
+                        }
 
                         self.send_nack_fragment(
                             packet,
