@@ -124,7 +124,6 @@ impl RustafarianDrone {
     /// Set the status of the drone as crashed. Can only be called by the Simulation Controller.
     fn make_crash(&mut self) {
         self.crashed = true;
-        self.neighbors.clear();
     }
 
     /// Change the packet drop rate. Can only be called by the Simulation Controller.
