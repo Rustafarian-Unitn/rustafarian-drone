@@ -5,7 +5,7 @@ mod fragment_tests {
     use crossbeam_channel::{unbounded, Receiver, Sender};
     use std::collections::HashMap;
     use std::thread;
-    use wg_2024::packet::{Packet, PacketType, Nack, NackType, FloodRequest, FloodResponse, NodeType};
+    use wg_2024::packet::{FloodRequest, FloodResponse, Fragment, Nack, NackType, NodeType, Packet, PacketType};
     use wg_2024::tests;
     use crate::SourceRoutingHeader;
     use wg_2024::drone::Drone;
@@ -286,5 +286,116 @@ mod fragment_tests {
         };
 
         assert_eq!(c_recv.recv().unwrap(), expected_nack, "The message received should be an error in routing!");
+    }
+
+
+    /// Test correct behavior in case the destination is a drone!
+    #[test]
+    fn run_wrong_destination() {
+        let (c_send, c_recv) = unbounded();
+        let (s_send, s_recv) = unbounded::<Packet>();
+        let (d1_send, d1_recv) = unbounded();
+        let (_d_command_send, d_command_recv) = unbounded();
+
+        let neighbours1 = HashMap::from([
+            (1, c_send.clone()),
+        ]);
+
+        let mut drone1 = RustafarianDrone::new(
+            11,
+            unbounded().0,
+            d_command_recv.clone(),
+            d1_recv.clone(),
+            neighbours1,
+            0.0,
+        );
+
+        thread::spawn(move || {
+            drone1.run();
+        });
+
+        let msg = Packet {
+            session_id: 0,
+            routing_header: SourceRoutingHeader {
+                hop_index: 1,
+                hops: [1, 11].to_vec()
+            },
+            pack_type: PacketType::MsgFragment(Fragment {
+                fragment_index: 0,
+                total_n_fragments: 1,
+                length: 1,
+                data: [2; 128]
+            })
+        };
+
+        d1_send.send(msg).unwrap();
+        let expected_nack = Packet {
+            session_id: 0,
+            routing_header: SourceRoutingHeader {
+                hop_index: 1,
+                hops: [11, 1].to_vec()
+            },
+            pack_type: PacketType::Nack(Nack {
+                fragment_index: 0,
+                nack_type: NackType::DestinationIsDrone
+            })
+        };
+
+        assert_eq!(c_recv.recv().unwrap(), expected_nack, "I should receive a NACK!");
+    }
+
+    #[test]
+    fn run_wrong_hop() {
+        let (c_send, c_recv) = unbounded();
+        let (s_send, s_recv) = unbounded::<Packet>();
+        let (d1_send, d1_recv) = unbounded();
+        let (_d_command_send, d_command_recv) = unbounded();
+
+        let neighbours1 = HashMap::from([
+            (1, c_send.clone()),
+        ]);
+
+        let mut drone1 = RustafarianDrone::new(
+            11,
+            unbounded().0,
+            d_command_recv.clone(),
+            d1_recv.clone(),
+            neighbours1,
+            0.0,
+        );
+
+        thread::spawn(move || {
+            drone1.run();
+        });
+
+        let msg = Packet {
+            session_id: 0,
+            routing_header: SourceRoutingHeader {
+                hop_index: 1,
+                hops: [1, 12, 13, 11].to_vec() // Here, 12 instead of 11
+            },
+            pack_type: PacketType::MsgFragment(Fragment {
+                fragment_index: 0,
+                total_n_fragments: 1,
+                length: 1,
+                data: [2; 128]
+            })
+        };
+
+        d1_send.send(msg).unwrap();
+
+        let expected_nack = Packet {
+            session_id: 0,
+            routing_header: SourceRoutingHeader {
+                hop_index: 1,
+                hops: [11, 1].to_vec()
+            },
+            pack_type: PacketType::Nack(Nack {
+                fragment_index: 0,
+                nack_type: NackType::UnexpectedRecipient(11)
+            })
+        };
+
+        assert_eq!(c_recv.recv().unwrap(), expected_nack, "I should receive a NACK!");
     }
 }
