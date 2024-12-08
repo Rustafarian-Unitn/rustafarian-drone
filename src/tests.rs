@@ -1,4 +1,5 @@
 mod fragments;
+mod simcontroller;
 
 fn run_all_tests() {
     println!("Running drop test");
