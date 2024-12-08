@@ -244,4 +244,47 @@ mod fragment_tests {
 
         assert_eq!(s_recv.recv().unwrap(), nack_packet);
     }
+
+    /// Check that if the drone is not in the neighbors, the result is a NACK of type ErrorInRouting
+    #[test]
+    fn run_wrong_neighbor() {
+        let (c_send, c_recv) = unbounded();
+        let (s_send, s_recv) = unbounded::<Packet>();
+        let (d1_send, d1_recv) = unbounded();
+        let (_d_command_send, d_command_recv) = unbounded();
+
+        let neighbours1 = HashMap::from([
+            (1, c_send.clone()),
+        ]);
+
+        let mut drone1 = RustafarianDrone::new(
+            11,
+            unbounded().0,
+            d_command_recv.clone(),
+            d1_recv.clone(),
+            neighbours1,
+            0.0,
+        );
+
+        thread::spawn(move || {
+            drone1.run();
+        });
+
+        let mut msg = create_sample_packet();
+        d1_send.send(msg).unwrap();
+
+        let expected_nack = Packet {
+            session_id: 1,
+            routing_header: SourceRoutingHeader {
+                hop_index: 1,
+                hops: [11, 1].to_vec()
+            },
+            pack_type: PacketType::Nack(Nack {
+                fragment_index: 1,
+                nack_type: NackType::ErrorInRouting(12)
+            })
+        };
+
+        assert_eq!(c_recv.recv().unwrap(), expected_nack, "The message received should be an error in routing!");
+    }
 }
