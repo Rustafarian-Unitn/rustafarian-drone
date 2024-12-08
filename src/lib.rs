@@ -206,7 +206,7 @@ impl RustafarianDrone {
         if next_hop_index >= packet.routing_header.hops.len() {
             println!(
                 "Error: next_hop_index ({}) >= packet.routing_header.hops.len() ({})",
-                next_hop_index, packet.routing_header.hop_index
+                next_hop_index, packet.routing_header.hops.len()
             );
             return false;
         }
