@@ -218,6 +218,7 @@ impl RustafarianDrone {
             Some(channel) => {
                 // Check if packet can be dropped, if so check the PDR
                 if !skip_pdr_check && self.should_drop() {
+                    packet.routing_header.hop_index -= 1; // We need to decrease, since we are not sending
                     // Packet dropped
                     self.send_nack_fragment(packet.clone(), NackType::Dropped, fragment_index);
 
@@ -237,6 +238,7 @@ impl RustafarianDrone {
                     Err(error) => {
                         // Should never reach this error, SC should prevent it
                         println!("Error while sending packet on closed channel");
+                        packet.routing_header.hop_index -= 1; // We need to decrease, since we are not sending
 
                         // If true, it means packet is an ACK/NACK/FLOOD_RESP, so it should be
                         // routed through the SC in order to reach it's destination
@@ -259,6 +261,7 @@ impl RustafarianDrone {
                     next_hop, self.id
                 );
                 // Next hop is not my neighbour
+                packet.routing_header.hop_index -= 1; // We need to decrease, since we are not sending
                 self.send_nack_fragment(packet, NackType::ErrorInRouting(next_hop), fragment_index);
             }
         }
@@ -417,13 +420,11 @@ impl RustafarianDrone {
 
     /// Reverse the route contained in the SourceRoutingHeader, starting from the current hop.
     fn reverse_route(&self, header: &SourceRoutingHeader) -> Vec<u8> {
-        if let Some(self_index) = header.hops.iter().position(|id| id == &self.id) {
-            let mut route: Vec<u8> = header.hops.clone();
-            route.truncate(self_index + 1);
-            route.reverse();
-            route
-        } else {
-            vec![]
-        }
+        let index = header.hop_index; // Take current hop
+        let mut route: Vec<u8> = header.hops.clone();
+        route.truncate(index); // Truncate from the start to the current index (excluded)
+        route.push(self.id); // Add our own ID
+        route.reverse(); // Reverse
+        route
     }
 }
