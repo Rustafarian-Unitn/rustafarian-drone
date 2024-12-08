@@ -356,9 +356,25 @@ mod fragment_tests {
         let (c_send, c_recv) = unbounded();
         let (s_send, s_recv) = unbounded::<Packet>();
         let (d1_send, d1_recv) = unbounded();
+        let (d2_send, d2_recv) = unbounded();
+        let (d3_send, d3_recv) = unbounded();
         let (_d_command_send, d_command_recv) = unbounded();
 
         let neighbours1 = HashMap::from([(1, c_send.clone())]);
+
+        
+        let neighbours1 = HashMap::from([
+            (12, d2_send.clone()),
+            (13, d3_send.clone()),
+            (1, c_send.clone()),
+        ]);
+        let neighbours2 = HashMap::from([
+            (11, d1_send.clone()),
+            (13, d3_send.clone()),
+            (21, s_send.clone()),
+            (1, c_send.clone()),
+        ]);
+        let neighbours3 = HashMap::from([(11, d1_send.clone()), (12, d2_send.clone())]);
 
         let mut drone1 = RustafarianDrone::new(
             11,
@@ -368,9 +384,31 @@ mod fragment_tests {
             neighbours1,
             0.0,
         );
+        let mut drone2 = RustafarianDrone::new(
+            12,
+            unbounded().0,
+            d_command_recv.clone(),
+            d2_recv.clone(),
+            neighbours2,
+            0.0,
+        );
+        let mut drone3 = RustafarianDrone::new(
+            13,
+            unbounded().0,
+            d_command_recv.clone(),
+            d3_recv.clone(),
+            neighbours3,
+            0.0,
+        );
 
         thread::spawn(move || {
             drone1.run();
+        });
+        thread::spawn(move || {
+            drone2.run();
+        });
+        thread::spawn(move || {
+            drone3.run();
         });
 
         let msg = Packet {
@@ -392,8 +430,8 @@ mod fragment_tests {
         let expected_nack = Packet {
             session_id: 0,
             routing_header: SourceRoutingHeader {
-                hop_index: 1,
-                hops: [11, 1].to_vec(),
+                hop_index: 3,
+                hops: [11, 13, 12, 1].to_vec(),
             },
             pack_type: PacketType::Nack(Nack {
                 fragment_index: 0,
