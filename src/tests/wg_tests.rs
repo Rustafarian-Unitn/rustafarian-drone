@@ -21,9 +21,9 @@ mod wg_tests {
     }
 
     // #[test]
-    // fn run_chain_fragment_ack() {
-    //     tests::generic_chain_fragment_ack::<RustafarianDrone>();
-    // }
+    fn run_chain_fragment_ack() {
+        tests::generic_chain_fragment_ack::<RustafarianDrone>();
+    }
 
     // #[test]
     // fn run_chain_fragment_drop() {

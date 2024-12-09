@@ -218,11 +218,12 @@ impl RustafarianDrone {
             Some(channel) => {
                 // Check if packet can be dropped, if so check the PDR
                 if !skip_pdr_check && self.should_drop() {
-                    // Packet dropped
-                    self.send_nack_fragment(packet.clone(), NackType::Dropped, fragment_index);
-
                     // Notify controller that a packet has been dropped
-                    self.controller_send.send(DroneEvent::PacketDropped(packet));
+                    self.controller_send.send(DroneEvent::PacketDropped(packet.clone()));
+
+                    // Packet dropped
+                    self.send_nack_fragment(packet, NackType::Dropped, fragment_index);
+
 
                     return false;
                 }
