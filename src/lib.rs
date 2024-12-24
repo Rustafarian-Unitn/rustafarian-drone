@@ -34,7 +34,15 @@ impl Drone for RustafarianDrone {
         pdr: f32,
     ) -> Self {
 
-        // TODO Should do some input validation (e.g. pdr in range)
+        // Saturate the pdr to 0.0..1.0
+        let pdr = if pdr > 1.0 {
+            1.0
+        } else if pdr < 0.0 {
+            0.0
+        } else {
+            pdr
+        };
+        
         Self {
             id,
             controller_send,
@@ -218,11 +226,11 @@ impl RustafarianDrone {
             Some(channel) => {
                 // Check if packet can be dropped, if so check the PDR
                 if !skip_pdr_check && self.should_drop() {
-                    // Packet dropped
-                    self.send_nack_fragment(packet.clone(), NackType::Dropped, fragment_index);
-
                     // Notify controller that a packet has been dropped
-                    self.controller_send.send(DroneEvent::PacketDropped(packet));
+                    self.controller_send.send(DroneEvent::PacketDropped(packet.clone()));
+
+                    // Packet dropped
+                    self.send_nack_fragment(packet, NackType::Dropped, fragment_index);
 
                     return false;
                 }

@@ -21,12 +21,7 @@ mod wg_tests {
     }
 
     // #[test]
-    // fn run_chain_fragment_ack() {
-    //     tests::generic_chain_fragment_ack::<RustafarianDrone>();
-    // }
-
-    // #[test]
-    // fn run_chain_fragment_drop() {
-    //     tests::generic_chain_fragment_drop::<RustafarianDrone>();
-    // }
+    fn run_chain_fragment_ack() {
+        tests::generic_chain_fragment_ack::<RustafarianDrone>();
+    }
 }
