@@ -428,6 +428,7 @@ impl RustafarianDrone {
         if let Some(self_index) = header.hops.iter().position(|id| id == &self.id) {
             let mut route: Vec<u8> = header.hops.clone();
             route.truncate(self_index + 1);
+            println!("Route: {:?}", route);
             route.reverse();
             route
         } else {
