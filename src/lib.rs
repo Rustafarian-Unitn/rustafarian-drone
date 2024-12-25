@@ -76,7 +76,7 @@ impl Drone for RustafarianDrone {
 impl RustafarianDrone {
 
     /// Handle packets that arrive from other drones.
-    pub fn handle_packet(&mut self, mut packet: Packet) {
+    fn handle_packet(&mut self, mut packet: Packet) {
         // Packets are cloned before the handle otherwise they get consumed by the arms execution
         let pack_type = packet.pack_type.clone();
         match pack_type {
@@ -213,8 +213,8 @@ impl RustafarianDrone {
         // Check if the next_hop_index is valid
         if next_hop_index >= packet.routing_header.hops.len() {
             println!(
-                "Error: next_hop_index ({}) >= packet.routing_header.hops.len() ({}), packet.routing_header.hops: {:?}",
-                next_hop_index, packet.routing_header.hops.len(), packet
+                "Error: next_hop_index ({}) >= packet.routing_header.hops.len() ({})",
+                next_hop_index, packet.routing_header.hops.len()
             );
             return false;
         }
@@ -428,7 +428,6 @@ impl RustafarianDrone {
         if let Some(self_index) = header.hops.iter().position(|id| id == &self.id) {
             let mut route: Vec<u8> = header.hops.clone();
             route.truncate(self_index + 1);
-            println!("Route: {:?}, self index {}", route, self_index);
             route.reverse();
             route
         } else {
