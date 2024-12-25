@@ -76,7 +76,7 @@ impl Drone for RustafarianDrone {
 impl RustafarianDrone {
 
     /// Handle packets that arrive from other drones.
-    fn handle_packet(&mut self, mut packet: Packet) {
+    pub fn handle_packet(&mut self, mut packet: Packet) {
         // Packets are cloned before the handle otherwise they get consumed by the arms execution
         let pack_type = packet.pack_type.clone();
         match pack_type {

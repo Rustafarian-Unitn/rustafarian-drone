@@ -362,7 +362,6 @@ mod fragment_tests {
 
         let neighbours1 = HashMap::from([(1, c_send.clone())]);
 
-        
         let neighbours1 = HashMap::from([
             (12, d2_send.clone()),
             (13, d3_send.clone()),
@@ -493,5 +492,47 @@ mod fragment_tests {
             expected_shortcut,
             "I should receive a ControllerShortcut!"
         );
+    }
+
+    // test a forwarding on a one-hop network
+    #[test]
+    fn run_one_hop() {
+        let (c_send, c_recv) = unbounded::<Packet>();
+        let (s_send, s_recv) = unbounded::<Packet>();
+        let (d1_send, d1_recv) = unbounded();
+        let (_d_command_send, d_command_recv) = unbounded();
+
+        let neighbours1 = HashMap::from([(1, c_send.clone()), (21, s_send.clone())]);
+
+        let mut drone1 = RustafarianDrone::new(
+            11,
+            unbounded().0,
+            d_command_recv.clone(),
+            d1_recv.clone(),
+            neighbours1,
+            0.0,
+        );
+
+        thread::spawn(move || {
+            drone1.run();
+        });
+
+        let mut msg = Packet {
+            session_id: 0,
+            routing_header: SourceRoutingHeader {
+                hop_index: 1,
+                hops: [1, 11, 21].to_vec(),
+            },
+            pack_type: PacketType::MsgFragment(Fragment {
+                fragment_index: 0,
+                total_n_fragments: 1,
+                length: 1,
+                data: [2; 128],
+            }),
+        };
+
+        d1_send.send(msg.clone()).unwrap();
+        msg.routing_header.hop_index = 2;
+        assert_eq!(s_recv.recv().unwrap(), msg);
     }
 }
