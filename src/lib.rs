@@ -389,7 +389,7 @@ impl RustafarianDrone {
                     routing_header: routing_header.clone(),
                     session_id,
                 }) {
-                    Ok(()) => {}
+                    Ok(()) => {println!("Sent request to {:?}", neighbor_id);},
                     // No message sent to SC. Crashed neighbours should not be in the topology
                     Err(error) => println!("Couldn't send response, as the neighbor has crashed"),
                 }
