@@ -362,6 +362,7 @@ impl RustafarianDrone {
         } else {
             // Send to neighbors
             // Save the last node's ID, we don't want to send the request to it
+            println!("Packet path trace: {:?}", packet);
             let last_node = (packet.path_trace.last().unwrap().0);
 
             // Only put myself in the path trace if I'm not crashed
