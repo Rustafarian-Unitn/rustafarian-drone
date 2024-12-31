@@ -33,15 +33,10 @@ impl Drone for RustafarianDrone {
         packet_send: HashMap<NodeId, Sender<Packet>>,
         pdr: f32,
     ) -> Self {
-
+        
+        let pdr = if f32::is_nan(pdr) { 0.0} else { pdr };
         // Saturate the pdr to 0.0..1.0
-        let pdr = if pdr > 1.0 {
-            1.0
-        } else if pdr < 0.0 {
-            0.0
-        } else {
-            pdr
-        };
+        let pdr = pdr.clamp(0.0, 1.0);
         
         Self {
             id,
