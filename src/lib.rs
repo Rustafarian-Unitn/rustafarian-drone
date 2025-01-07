@@ -51,7 +51,9 @@ impl Drone for RustafarianDrone {
     }
 
     fn run(&mut self) {
-        loop {
+
+        // While the drone is not crashed, listen on both channels
+        while !self.crashed {
             select_biased! {
                 recv(self.controller_recv) -> command => {
                     if let Ok(command) = command {
@@ -64,6 +66,12 @@ impl Drone for RustafarianDrone {
                     }
                 },
             }
+        }
+
+        // If the drone crashes, then only listen on its own receiving channel until no more
+        // packet are present in the queue
+        while let Ok(packet) = self.packet_recv.recv() {
+            self.handle_packet(packet);
         }
     }
 }
