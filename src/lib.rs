@@ -37,7 +37,7 @@ pub struct RustafarianDrone {
     packet_recv: Receiver<Packet>,              // Receive messages from other drones
     pdr: f32,                                   // Packet Drop Rate
     neighbors: HashMap<NodeId, Sender<Packet>>, // Map containing the neighbors of the current drone. The key is the ID of the neighbor, the value is the channel
-    flood_requests: HashSet<u64>,               // Contains: O(1) in average
+    flood_requests: HashSet<(u8, u64)>,         // Contains: O(1) in average
     crashed: bool,                              // Whether the drone is crashed
     log_level: LogLevel,
 }
@@ -395,11 +395,12 @@ impl RustafarianDrone {
         session_id: u64,
         mut routing_header: SourceRoutingHeader,
     ) {
-        // If we have the ID in memory, and the path trace contains our ID
+        // If we have already have the flood id from that sender
         // Request already handled, prepare response
-        // TODO Add this back?
-        /** && packet.clone().path_trace.iter().any(|node| node.0 == self.id) */
-        if self.flood_requests.contains(&packet.flood_id) && !self.crashed {
+        let flood_from_sender = self
+            .flood_requests
+            .get(&(packet.initiator_id, packet.flood_id));
+        if flood_from_sender.is_some() && !self.crashed {
             // Get the ID of the drone that sent the request
             let sender_id = packet.path_trace.last().unwrap().0;
             // Add myself to the path trace
@@ -458,7 +459,7 @@ impl RustafarianDrone {
                 packet.path_trace.push((self.id, NodeType::Drone));
             }
 
-            self.flood_requests.insert(packet.flood_id);
+            self.flood_requests.insert((packet.initiator_id, packet.flood_id));
 
             // Send to all neighbors
             for neighbor in &self.neighbors {
