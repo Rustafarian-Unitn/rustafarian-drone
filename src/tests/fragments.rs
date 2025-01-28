@@ -362,7 +362,6 @@ mod fragment_tests {
 
         let neighbours1 = HashMap::from([(1, c_send.clone())]);
 
-        
         let neighbours1 = HashMap::from([
             (12, d2_send.clone()),
             (13, d3_send.clone()),

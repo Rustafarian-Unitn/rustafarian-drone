@@ -1,7 +1,7 @@
 #![cfg(test)]
+use crate::RustafarianDrone;
 use rusty_tester::*;
 use std::time::Duration;
-use crate::RustafarianDrone;
 
 type Tested = RustafarianDrone;
 const TIMEOUT: Duration = Duration::from_millis(100);
