@@ -11,7 +11,24 @@ use wg_2024::network::{NodeId, SourceRoutingHeader};
 use wg_2024::packet::PacketType::Nack;
 use wg_2024::packet::{Ack, FloodRequest, FloodResponse, NackType, NodeType};
 use wg_2024::packet::{Packet, PacketType};
+use std::env;
+use std::env::VarError;
 mod tests;
+
+const LOG_ENV_VAR: &str = "RUSTAFARIAN_LOG_LEVEL";
+/// Value used from the log method to filter the log messages:
+///
+/// * `NONE`: logging is disabled
+/// * `ERROR`: only log errors, to `std::error`
+/// * `INFO`: log errors and basic information
+/// * `DEBUG`: used for debug, will log every information
+#[derive(Debug)]
+pub enum LogLevel {
+    NONE,
+    ERROR,
+    INFO,
+    DEBUG,
+}
 
 pub struct RustafarianDrone {
     id: NodeId,                                 // The ID of the drone, u8
@@ -22,6 +39,7 @@ pub struct RustafarianDrone {
     neighbors: HashMap<NodeId, Sender<Packet>>, // Map containing the neighbors of the current drone. The key is the ID of the neighbor, the value is the channel
     flood_requests: HashSet<u64>,               // Contains: O(1) in average
     crashed: bool,                              // Whether the drone is crashed
+    log_level: LogLevel
 }
 
 impl Drone for RustafarianDrone {
@@ -31,13 +49,41 @@ impl Drone for RustafarianDrone {
         controller_recv: Receiver<DroneCommand>,
         packet_recv: Receiver<Packet>,
         packet_send: HashMap<NodeId, Sender<Packet>>,
-        pdr: f32,
+        pdr: f32
     ) -> Self {
         
         let pdr = if f32::is_nan(pdr) { 0.0} else { pdr };
         // Saturate the pdr to 0.0..1.0
         let pdr = pdr.clamp(0.0, 1.0);
-        
+
+        let mut log_level: LogLevel;
+        match env::var(LOG_ENV_VAR) {
+
+            Ok(val) => {
+
+                match val.as_str() {
+                    "NONE" => { log_level = LogLevel::NONE; }
+                    "ERROR" => { log_level = LogLevel::ERROR; }
+                    "INFO" => { log_level = LogLevel::INFO; }
+                    "DEBUG" => { log_level = LogLevel::DEBUG; }
+                    _ => {
+                        println!(
+                            "Wrong value [{}] in environment variable {},\
+                            logger will be disabled by default", val, LOG_ENV_VAR
+                        );
+                        log_level = LogLevel::NONE;
+                    }
+                }
+            }
+            Err(e) => {
+                println!(
+                    "Environment variable {} couldn't be read,\
+                     logger will be disabled by default", LOG_ENV_VAR
+                );
+                log_level = LogLevel::NONE;
+            }
+        }
+
         Self {
             id,
             controller_send,
@@ -47,6 +93,7 @@ impl Drone for RustafarianDrone {
             pdr,
             flood_requests: HashSet::new(),
             crashed: false,
+            log_level
         }
     }
 
@@ -215,10 +262,19 @@ impl RustafarianDrone {
 
         // Check if the next_hop_index is valid
         if next_hop_index >= packet.routing_header.hops.len() {
-            println!(
-                "Error: next_hop_index ({}) >= packet.routing_header.hops.len() ({})",
-                next_hop_index, packet.routing_header.hops.len()
+
+            self.log(
+                format!(
+                    "Error: next_hop_index ({}) >= packet.routing_header.hops.len() ({})",
+                    next_hop_index, packet.routing_header.hops.len()
+                ).as_str(),
+                LogLevel::ERROR
             );
+
+            // println!(
+            //     "Error: next_hop_index ({}) >= packet.routing_header.hops.len() ({})",
+            //     next_hop_index, packet.routing_header.hops.len()
+            // );
             return false;
         }
 
@@ -247,7 +303,9 @@ impl RustafarianDrone {
                     }
                     Err(error) => {
                         // Should never reach this error, SC should prevent it
-                        println!("Error while sending packet on closed channel");
+                        self.log("Error while sending packet on closed channel", LogLevel::ERROR);
+
+                        // println!("Error while sending packet on closed channel");
 
                         // If true, it means packet is an ACK/NACK/FLOOD_RESP, so it should be
                         // routed through the SC in order to reach it's destination
@@ -265,10 +323,18 @@ impl RustafarianDrone {
                 }
             }
             None => {
-                println!(
-                    "Error: next_hop ({}) is not a neighbor of drone {}",
-                    next_hop, self.id
+                self.log(
+                    format!(
+                        "Error: next_hop ({}) is not a neighbor of drone {}",
+                        next_hop, self.id
+                    ).as_str(),
+                    LogLevel::ERROR
                 );
+
+                // println!(
+                //     "Error: next_hop ({}) is not a neighbor of drone {}",
+                //     next_hop, self.id
+                // );
                 // Next hop is not my neighbour
                 self.send_nack_fragment(packet, NackType::ErrorInRouting(next_hop), fragment_index);
             }
@@ -353,11 +419,15 @@ impl RustafarianDrone {
             match self.neighbors.get(&sender_id) {
                 Some(channel) => match channel.send(new_packet) {
                     Ok(()) => {
-                        println!("Sent response to {:?}", sender_id);
+                        self.log(format!("Sent response to {:?}", sender_id).as_str(), LogLevel::INFO);
+
+                        // println!("Sent response to {:?}", sender_id);
                     }
                     Err(error) => {
                         // No message sent to SC. Crashed neighbours should not be in the topology
-                        println!("Couldn't send response, as the neighbor has crashed")
+                        self.log("Couldn't send response, as the neighbor has crashed", LogLevel::INFO);
+
+                        // println!("Couldn't send response, as the neighbor has crashed")
                     }
                 },
                 _ => {}
@@ -393,7 +463,10 @@ impl RustafarianDrone {
                 }) {
                     Ok(()) => {}
                     // No message sent to SC. Crashed neighbours should not be in the topology
-                    Err(error) => println!("Couldn't send response, as the neighbor has crashed"),
+                    Err(error) => {
+                        self.log("Couldn't send response, as the neighbor has crashed", LogLevel::INFO);
+                        // println!("Couldn't send response, as the neighbor has crashed")
+                    }
                 }
             }
         }
@@ -435,6 +508,60 @@ impl RustafarianDrone {
             route
         } else {
             vec![]
+        }
+    }
+
+    /// Utility method used to cleanly log information, differentiating on three different levels
+    ///
+    /// # Args
+    /// * `log_message: &str` - the message to log
+    /// * `level: u8` - the level of the log
+    pub fn log(&self, log_message: &str, level: LogLevel) {
+
+        match level {
+
+            LogLevel::ERROR => { // Handle a log at ERROR level
+                match self.log_level {
+                    LogLevel::NONE => {}
+
+                    // ERRORs can be logged if the drone log_level is set to anything except NONE
+                    _ => {
+                        eprintln!(
+                            "[Rustafarian Drone {}] - LEVEL: ERROR >>> {}",
+                            self.id, log_message
+                        );
+                    }
+                }
+            }
+            LogLevel::INFO => { // Handle a log at INFO level
+                match self.log_level {
+                    LogLevel::NONE => {}
+                    LogLevel::ERROR => {}
+
+                    // INFOs can be logged if the drone log_level is INFO or DEBUG
+                    _ => {
+                        println!(
+                            "[Rustafarian Drone {}] - LEVEL: INFO >>> {}",
+                            self.id, log_message
+                        );
+                    }
+                }
+            }
+            LogLevel::DEBUG => { // Handle a log at DEBUG level
+                match self.log_level {
+
+                    // DEBUGs can be logged if the drone log_level is set to DEBUG
+                    LogLevel::DEBUG => {
+                        println!(
+                            "[Rustafarian Drone {}] - LEVEL: DEBUG >>> {}",
+                            self.id, log_message
+                        );
+                    }
+                    _ => {}
+                }
+            }
+
+            LogLevel::NONE => {}
         }
     }
 }
