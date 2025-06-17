@@ -11,7 +11,7 @@ use wg_2024::controller::{DroneCommand, DroneEvent};
 use wg_2024::drone::Drone;
 use wg_2024::network::{NodeId, SourceRoutingHeader};
 use wg_2024::packet::PacketType::Nack;
-use wg_2024::packet::{Ack, FloodRequest, FloodResponse, NackType, NodeType};
+use wg_2024::packet::{Ack, FloodRequest, FloodResponse, Fragment, NackType, NodeType};
 use wg_2024::packet::{Packet, PacketType};
 mod tests;
 
@@ -289,9 +289,19 @@ impl RustafarianDrone {
             Some(channel) => {
                 // Check if packet can be dropped, if so check the PDR
                 if !skip_pdr_check && self.should_drop() {
+
+                    let dropped_packet = Packet {
+                        routing_header: SourceRoutingHeader::new(
+                            packet.routing_header.hops.clone(),
+                            packet.routing_header.hop_index - 1
+                        ),
+                        session_id: packet.session_id.clone(),
+                        pack_type: packet.pack_type.clone()
+                    };
+
                     // Notify controller that a packet has been dropped
                     self.controller_send
-                        .send(DroneEvent::PacketDropped(packet.clone()));
+                        .send(DroneEvent::PacketDropped(dropped_packet));
 
                     // Packet dropped
                     self.send_nack_fragment(packet, NackType::Dropped, fragment_index);

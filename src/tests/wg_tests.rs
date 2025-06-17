@@ -13,17 +13,17 @@ mod wg_tests {
     use wg_2024::tests;
 
     // This test is wrong
-    // #[test]
-    // fn run_fragment_drop() {
-    // tests::generic_fragment_drop::<RustafarianDrone>();
-    // }
+    #[test]
+    fn run_fragment_drop() {
+    tests::generic_fragment_drop::<RustafarianDrone>();
+    }
 
     #[test]
     fn run_fragment_forward() {
         tests::generic_fragment_forward::<RustafarianDrone>();
     }
 
-    // #[test]
+    #[test]
     fn run_chain_fragment_ack() {
         tests::generic_chain_fragment_ack::<RustafarianDrone>();
     }
